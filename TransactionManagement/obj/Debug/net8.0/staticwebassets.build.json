@@ -1,0 +1,11 @@
+{
+  "Version": 1,
+  "Hash": "dO36KjJ546qW+5ozfmLf75KQZAk8EKaZ1fdFCDBIrRU=",
+  "Source": "TransactionManagement",
+  "BasePath": "_content/TransactionManagement",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": []
+}
