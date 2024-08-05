@@ -2,7 +2,7 @@
 services:
   transaction.api:
     build:
-      context: "C:\\Users\\bakud\\RiderProjects\\TransactionManagement\\TransactionManagement"
+      context: "/Users/maks/RiderProjects/TransMang/TransactionManagement"
       dockerfile: "Dockerfile"
       target: "base"
     command: []
@@ -14,7 +14,7 @@ services:
     image: "mathhunt.api:dev"
     ports: []
     volumes:
-    - "C:\\Users\\bakud\\.nuget\\packages:/home/app/.nuget/packages"
-    - "C:\\Users\\bakud\\RiderProjects\\TransactionManagement\\TransactionManagement:/app:rw"
-    - "C:\\Users\\bakud\\RiderProjects\\TransactionManagement:/src:rw"
+    - "/Users/maks/.nuget/packages:/home/app/.nuget/packages"
+    - "/Users/maks/RiderProjects/TransMang/TransactionManagement:/app:rw"
+    - "/Users/maks/RiderProjects/TransMang:/src:rw"
     working_dir: "/app"

@@ -3,11 +3,7 @@ using System.Globalization;
 using CsvHelper;
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore.SqlServer.Storage.Internal;
 using Newtonsoft.Json.Linq;
-using NodaTime;
-using NodaTime.Extensions;
-using Npgsql;
 using OfficeOpenXml;
 using TimeZoneConverter;
 using TransactionManagement.Models;
@@ -18,12 +14,8 @@ namespace TransactionManagement.Controllers;
 [Route("[action]")]
 public class TransactionController(IConfiguration configuration) : ControllerBase
 {
-    private readonly SqlConnection connectionDb =
+    private readonly SqlConnection? _connectionDb =
         new SqlConnection(configuration.GetConnectionString("AppDbContext"));
-
-    private const string _apiKey = "5RGNDXDZNVE1";
-
-    
 
 
     [HttpGet]
@@ -32,17 +24,20 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
         var timeZone = DateTimeOffset.Now.Offset;
         var firstDataOffset = new DateTimeOffset(firstData, timeZone);
         var secondDataOffset = new DateTimeOffset(secondData, timeZone);
-        await using (connectionDb)
+        await using (_connectionDb)
         {
-            await connectionDb.OpenAsync();
+            if (_connectionDb is null) return BadRequest("Connection is null");
+            
+            await _connectionDb.OpenAsync();
             const string sql = @"
                 SELECT * 
                 FROM transactions 
                 WHERE transactions.transaction_date >= @FirstData 
-                AND transactions.transaction_date <= @SecondData";
+                AND transactions.transaction_date <= @SecondData
+                ORDER BY transaction_date";
 
             var parameters = new { FirstData = firstDataOffset, SecondData = secondDataOffset };
-            var data = await connectionDb.QueryAsync<Transaction>(sql, parameters);
+            var data = await _connectionDb.QueryAsync<Transaction>(sql, parameters);
 
             foreach (var item in data)
             {
@@ -56,39 +51,109 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
     }
     
     [HttpGet]
-    public async Task<ActionResult> GetTransactionBetweenTwoDataClientOffsetAsync(DateTimeOffset firstData, DateTimeOffset secondData)
+    public async Task<ActionResult> GetTransactionBetweenTwoDataClientOffsetAsync(DateTime firstData, DateTime secondData)
     {
-        await using (connectionDb)
+        var dataList = new List<Transaction>();
+
+        await using (_connectionDb)
         {
-            await connectionDb.OpenAsync();
-            const string sql = @"
-                SELECT *
-                FROM transactions
-                WHERE  transaction_date >= @FirstData
-                AND transaction_date <= @SecondData";
-
-            var parameters = new { FirstData = firstData, SecondData = secondData };
-            var data = await connectionDb.QueryAsync<Transaction>(sql, parameters);
-
-            foreach (var item in data)
-            {
-                item.transaction_date = item.transaction_date.UtcDateTime;
-            }
+            if (_connectionDb is null) return BadRequest("Connection is null");
             
+            await _connectionDb.OpenAsync();
+            const string sql = @"
+                SELECT transaction_id, name, email, amount, transaction_date, client_location
+                FROM (
+                    SELECT transaction_id, name, email, amount, CAST(transaction_date as DATETIME) as transaction_date, client_location
+                    FROM transactions
+                ) AS subquery
+                WHERE subquery.transaction_date >= @FirstData
+                AND subquery.transaction_date <= @SecondData
+                ORDER BY transaction_date";
+            
+
+            await using var command = new SqlCommand(sql, _connectionDb);
+            command.Parameters.AddWithValue("@FirstData", firstData);
+            command.Parameters.AddWithValue("@SecondData", secondData);
+            await using var reader = await command.ExecuteReaderAsync();
+
+            while (await reader.ReadAsync())
+            {
+                var data = new Transaction
+                {
+                    transaction_id = reader.GetString(0),
+                    name = reader.GetString(1),
+                    email = reader.GetString(2),
+                    amount = reader.GetString(3),
+                    transaction_date = reader.GetDateTime(4),
+                    client_location = reader.GetString(5)
+                };
+
+                dataList.Add(data);
+
+            }
                 
-            return Ok(data);
         }
-        
+
+        return Ok(dataList);
+
+    }
+
+    [HttpGet]
+    public async Task<ActionResult> GetJanuaryTransactionsAsync()
+    {
+        var dataList = new List<Transaction>();
+
+        await using (_connectionDb)
+        {
+            if (_connectionDb is null) return BadRequest("Connection is null");
+            
+            await _connectionDb.OpenAsync();
+            const string sql = @"
+                SELECT transaction_id, name, email, amount, transaction_date, client_location
+                FROM (
+                    SELECT transaction_id, name, email, amount, CAST(transaction_date as DATETIME) as transaction_date, client_location
+                    FROM transactions
+                ) AS subquery
+                WHERE subquery.transaction_date >= '2024-01-01 00:00:00'
+                AND subquery.transaction_date <= '2024-01-31 23:59:59'
+                ORDER BY transaction_date";
+            
+
+            await using var command = new SqlCommand(sql, _connectionDb);
+            await using var reader = await command.ExecuteReaderAsync();
+
+            while (await reader.ReadAsync())
+            {
+                var data = new Transaction
+                {
+                    transaction_id = reader.GetString(0),
+                    name = reader.GetString(1),
+                    email = reader.GetString(2),
+                    amount = reader.GetString(3),
+                    transaction_date = reader.GetDateTime(4),
+                    client_location = reader.GetString(5)
+                };
+
+                dataList.Add(data);
+
+            }
+                
+        }
+
+        return Ok(dataList);
     }
 
 
     [HttpGet]
     public async Task<ActionResult> ExportToExcelAsync()
     {
-        await using (connectionDb)
+        await using (_connectionDb)
         {
+            if (_connectionDb is null) return BadRequest("Connection is null");
+
+            
             const string query = "SELECT * FROM transactions";
-            var data = (await connectionDb.QueryAsync(query)).ToList();
+            var data = (await _connectionDb.QueryAsync(query)).ToList();
 
             if (data.Count == 0)
             {
@@ -99,20 +164,18 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
             using (var package = new ExcelPackage(fileStream))
             {
                 var worksheet = package.Workbook.Worksheets.Add("Data");
-
-                // Добавление заголовков
+                
                 var properties = ((IDictionary<string, object>)data.First()).Keys.ToList();
-                for (int i = 0; i < properties.Count; i++)
+                for (var i = 0; i < properties.Count; i++)
                 {
                     worksheet.Cells[1, i + 1].Value = properties[i];
                 }
 
-                // Добавление данных
-                int row = 2;
+                var row = 2;
                 foreach (var item in data)
                 {
                     var values = ((IDictionary<string, object>)item).Values.ToList();
-                    for (int col = 0; col < values.Count; col++)
+                    for (var col = 0; col < values.Count; col++)
                     {
                         worksheet.Cells[row, col + 1].Value = values[col];
                     }
@@ -140,11 +203,11 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
                 var timeZoneInfo = TZConvert.GetTimeZoneInfo(await GetTimeZoneAsync(item.client_location)).GetUtcOffset(item.transaction_date);
                 item.transaction_date = new DateTimeOffset(item.transaction_date.DateTime, timeZoneInfo);
             }
-            await using (connectionDb)
+            await using (_connectionDb)
             {
-                if (connectionDb is null) return default;
+                if (_connectionDb is null) return default;
 
-                await connectionDb.OpenAsync();
+                await _connectionDb.OpenAsync();
 
 
                 const string sql = @"
@@ -163,7 +226,7 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
                     INSERT (transaction_id, name, email, amount, transaction_date, client_location)
                     VALUES (source.transaction_id, source.name, source.email, source.amount, source.transaction_date, source.client_location);";
 
-                await connectionDb.ExecuteAsync(sql, data);
+                await _connectionDb.ExecuteAsync(sql, data);
             }
         }
         catch (ArgumentNullException e)
@@ -192,7 +255,7 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
     }
     
 
-    private static readonly HttpClient client = new HttpClient
+    private static readonly HttpClient Client = new HttpClient
     {
         Timeout = TimeSpan.FromSeconds(10) // Set an appropriate timeout
     };
@@ -211,7 +274,7 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
         {
             try
             {
-                var response = await client.GetAsync(url).ConfigureAwait(false);
+                var response = await Client.GetAsync(url).ConfigureAwait(false);
                 if (response.IsSuccessStatusCode)
                 {
                     var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
