@@ -27,7 +27,7 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
         await using (_connectionDb)
         {
             if (_connectionDb is null) return BadRequest("Connection is null");
-            
+
             await _connectionDb.OpenAsync();
             const string sql = @"
                 SELECT * 
@@ -43,22 +43,22 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
             {
                 item.transaction_date = item.transaction_date.UtcDateTime;
             }
-            
-                
+
+
             return Ok(data);
         }
-        
     }
-    
+
     [HttpGet]
-    public async Task<ActionResult> GetTransactionBetweenTwoDataClientOffsetAsync(DateTime firstData, DateTime secondData)
+    public async Task<ActionResult> GetTransactionBetweenTwoDataClientOffsetAsync(DateTime firstData,
+        DateTime secondData)
     {
         var dataList = new List<Transaction>();
 
         await using (_connectionDb)
         {
             if (_connectionDb is null) return BadRequest("Connection is null");
-            
+
             await _connectionDb.OpenAsync();
             const string sql = @"
                 SELECT transaction_id, name, email, amount, transaction_date, client_location
@@ -69,7 +69,7 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
                 WHERE subquery.transaction_date >= @FirstData
                 AND subquery.transaction_date <= @SecondData
                 ORDER BY transaction_date";
-            
+
 
             await using var command = new SqlCommand(sql, _connectionDb);
             command.Parameters.AddWithValue("@FirstData", firstData);
@@ -89,13 +89,10 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
                 };
 
                 dataList.Add(data);
-
             }
-                
         }
 
         return Ok(dataList);
-
     }
 
     [HttpGet]
@@ -106,7 +103,7 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
         await using (_connectionDb)
         {
             if (_connectionDb is null) return BadRequest("Connection is null");
-            
+
             await _connectionDb.OpenAsync();
             const string sql = @"
                 SELECT transaction_id, name, email, amount, transaction_date, client_location
@@ -117,7 +114,7 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
                 WHERE subquery.transaction_date >= '2024-01-01 00:00:00'
                 AND subquery.transaction_date <= '2024-01-31 23:59:59'
                 ORDER BY transaction_date";
-            
+
 
             await using var command = new SqlCommand(sql, _connectionDb);
             await using var reader = await command.ExecuteReaderAsync();
@@ -135,9 +132,7 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
                 };
 
                 dataList.Add(data);
-
             }
-                
         }
 
         return Ok(dataList);
@@ -145,15 +140,22 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
 
 
     [HttpGet]
-    public async Task<ActionResult> ExportToExcelAsync()
+    public async Task<ActionResult> ExportToExcelAsync(int firstElement, int countElement)
     {
         await using (_connectionDb)
         {
             if (_connectionDb is null) return BadRequest("Connection is null");
 
-            
+
             const string query = "SELECT * FROM transactions";
-            var data = (await _connectionDb.QueryAsync(query)).ToList();
+
+            var data = (await _connectionDb.QueryAsync(query))
+                .ToList();
+
+            if (countElement > data.Count)
+                return BadRequest("Count Element biggest than count transaction in db");
+
+            data = data.Slice(firstElement, countElement);
 
             if (data.Count == 0)
             {
@@ -164,7 +166,7 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
             using (var package = new ExcelPackage(fileStream))
             {
                 var worksheet = package.Workbook.Worksheets.Add("Data");
-                
+
                 var properties = ((IDictionary<string, object>)data.First()).Keys.ToList();
                 for (var i = 0; i < properties.Count; i++)
                 {
@@ -191,7 +193,7 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
             return File(fileStream, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", excelName);
         }
     }
-    
+
     [HttpPost]
     public async Task<string> DownloadDataAsync(IFormFile file)
     {
@@ -200,9 +202,11 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
             var data = ReadCsvFile(file);
             foreach (var item in data)
             {
-                var timeZoneInfo = TZConvert.GetTimeZoneInfo(await GetTimeZoneAsync(item.client_location)).GetUtcOffset(item.transaction_date);
+                var timeZoneInfo = TZConvert.GetTimeZoneInfo(await GetTimeZoneAsync(item.client_location))
+                    .GetUtcOffset(item.transaction_date);
                 item.transaction_date = new DateTimeOffset(item.transaction_date.DateTime, timeZoneInfo);
             }
+
             await using (_connectionDb)
             {
                 if (_connectionDb is null) return default;
@@ -249,11 +253,11 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
         using var stream = file.OpenReadStream();
         using var reader = new StreamReader(stream);
         using var csv = new CsvReader(reader, CultureInfo.InvariantCulture);
-        
+
         var records = csv.GetRecords<Transaction>().ToList();
         return records;
     }
-    
+
 
     private static readonly HttpClient Client = new HttpClient
     {
@@ -263,8 +267,8 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
     private async Task<string> GetTimeZoneAsync(string location)
     {
         var attempts = 0;
-        const int maxRetries = 3; 
-        
+        const int maxRetries = 3;
+
         var coordinate = "latitude=" + location
             .Replace(" ", "")
             .Replace(",", "&longitude=");
@@ -290,12 +294,12 @@ public class TransactionController(IConfiguration configuration) : ControllerBas
                     Console.WriteLine("Max retries reached. Exiting.");
                     throw;
                 }
+
                 Console.WriteLine(ex.Message);
             }
         }
-        
+
 
         return "Not Found";
     }
-    
 }
